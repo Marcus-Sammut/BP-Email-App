@@ -1,4 +1,6 @@
 ﻿# C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -window hidden -ExecutionPolicy RemoteSigned -command "& 'C:\Users\recep\OneDrive\Desktop\Test\New folder\email.ps1'"
+# TODO reorganise imports
+# TODO either add more separate files, or just bring back the add files button into main file
 . .\PatientScrape.ps1
 . .\Helper.ps1
 
@@ -37,6 +39,16 @@ function Autofill-Form {
     }
 }
 
+function Clear-Files {
+    $global:zipFileNames = @()
+    $filesListedL.Text = ""
+    $fileCountL.Text = "Files added: 0"
+    $pageCountL.Text = "Total pages: 0"
+    $SendButton.Enabled = $false
+    $ResetFilesButton.Enabled = $false
+    $autofillCheckbox.Checked = $true
+}
+
 function Clear-Form {
     Clear-Files
     $UnprotectedCheckbox.checked = $false
@@ -44,27 +56,16 @@ function Clear-Form {
     $emailBox.Focus()
 }
 
-function Clear-Files {
-    #TODO
-}
-
-function Enable-Emailing {
-    #TODO
-}
-
 $global:zipFileNames = @()
+$cdfPath = $PWD.ToString() + "\cpdf.exe"
 
 function Add-FileToZip {
-    # Don't autofill while fileDialog is open
-    $autofillCheckbox.Checked = $false
-
     $FileBrowser = New-Object System.Windows.Forms.OpenFileDialog -Property @{
         Title = Set-FileDialog-Title
         InitialDirectory = $global:defaultDir
         MultiSelect = $false
         Filter = 'PDF Files (*.pdf)|*.pdf|All Files (*.*)|*.*'
     }
-
     $FileBrowser.add_FileOk({
         param($s, $e)
         $filename = Split-Path $FileBrowser.FileName -leaf
@@ -76,13 +77,19 @@ function Add-FileToZip {
             [System.Windows.MessageBox]::Show("You have already selected this file: {0}" -f $filename, "Error")
         }
     })
+    
+    # Don't autofill while fileDialog is open
+    $autofillCheckbox.Checked = $false
     if ($FileBrowser.ShowDialog() -eq 1) { # sys.win.forms.dialogresult OK == 1
         $global:zipFileNames += Split-Path $FileBrowser.FileName -leaf
-        $mainForm.Text = $global:zipFileNames
         $filesListedL.Text = $global:zipFileNames -join ', '
-        $filesAddedL.Text = "Files added: {0}" -f $global:zipFileNames.Count
+        $fileCountL.Text = "Files added: {0}" -f $global:zipFileNames.Count
+        $pageCountL.Text = "Total pages: {0}" -f (&$cdfPath -pages $FileBrowser.FileName)
         $ResetFilesButton.Enabled = $true
         $SendButton.Enabled = $true
+    } else {
+        # re-enable autofill if no file was added
+        $autofillCheckbox.Checked = $true
     }
 }
 
@@ -126,11 +133,6 @@ function Send-Email {
         &$oLookPath /c ipm.note /m "$email`?subject=$escaped_subj" /a $zipPath
     }
     Clear-Form
-    $global:zipFileNames = @()
-    $SendButton.Enabled = $false
-    $filesAddedL.Text = "Files added: 0"
-    $filesListedL.Text = ""
-    $ResetFilesButton.Enabled = $false
     $autofillCheckbox.Checked = $true
 }
 
@@ -140,7 +142,7 @@ Add-Type -AssemblyName PresentationCore,PresentationFramework # for messageBox
 $mainForm = New-Object System.Windows.Forms.Form
 $mainForm.Text ='NEW VERSION NEW VERSION Create New Email - Press F3 to copy DOB'
 $mainForm.Width = 460
-$mainForm.Height = 260
+$mainForm.Height = 280
 $mainForm.AutoSize = $true
 $mainForm.MaximizeBox = $False
 $mainForm.FormBorderStyle = 'FixedSingle'
@@ -325,25 +327,31 @@ $ResetFilesButton.Text = "Reset Files"
 $ResetFilesButton.Enabled = $false
 $ResetFilesButton.BackColor = [System.Drawing.ColorTranslator]::FromHtml("#99c1f0")
 $ResetFilesButton.Add_Click({
-    $global:zipFileNames = @()
-    $filesAddedL.Text = "Files added: 0"
-    $filesListedL.Text = ""
-    $ResetFilesButton.Enabled = $false
-    $SendButton.Enabled = $false
+    Clear-Files
 })
 $mainForm.Controls.Add($ResetFilesButton)
 
-$filesAddedL = New-Object System.Windows.Forms.Label
-$filesAddedL.Text = "Files added: 0"
-$filesAddedL.Location = New-Object System.Drawing.Point(301, 200)
-$filesAddedL.AutoSize = $true
-$mainForm.Controls.Add($filesAddedL)
+
+$fileCountL = New-Object System.Windows.Forms.Label
+$fileCountL.Text = "Files added: 0"
+$fileCountL.Location = New-Object System.Drawing.Point(298, 200)
+$fileCountL.AutoSize = $true
+$mainForm.Controls.Add($fileCountL)
+
+$pageCountL = New-Object System.Windows.Forms.Label
+$pageCountL.Text = "Total pages: 0"
+$pageCountL.Location = New-Object System.Drawing.Point(295, 218)
+$pageCountL.TextAlign = 64
+$pageCountL.AutoSize = $true
+$mainForm.Controls.Add($pageCountL)
 
 $filesListedL = New-Object System.Windows.Forms.Label
 $filesListedL.Text = ""
 $filesListedL.Location = New-Object System.Drawing.Point(10, 200)
+$filesListedL.MaximumSize = New-Object System.Drawing.Size(280, 38)
 $filesListedL.AutoSize = $true
 $mainForm.Controls.Add($filesListedL)
+
 
 # Clear Form button
 $ClearButton = New-Object System.Windows.Forms.Button
