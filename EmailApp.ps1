@@ -44,6 +44,7 @@ function Clear-Files {
     $filesListedL.Text = ""
     $fileCountL.Text = "Files added: 0"
     $pageCountL.Text = "Total pages: 0"
+    $global:zipPageCount = 0
     $SendButton.Enabled = $false
     $ResetFilesButton.Enabled = $false
     $autofillCheckbox.Checked = $true
@@ -56,7 +57,39 @@ function Clear-Form {
     $emailBox.Focus()
 }
 
+#TODO move this to helper or own file
+function Check-DetailsOCR {
+    param($file)
+    try {
+        &magick convert -density 192 "$file[0]" -quality 100 -alpha remove $env:temp\magickoutput.png
+        &tesseract $env:temp\magickoutput.png $env:temp\tesseractOCR
+        # delete the output png
+        $OCRtext = Get-Content $env:temp\tesseractOCR.txt
+        $dob = $dobBox.Text.trim()
+        $zipName = $zipbox.Text.trim().ToLower()
+        $dob19 = $dob[0]+$dob[1]+'/'+$dob[2]+$dob[3]+'/'+'19'+$dob[4]+$dob[5]
+        $dob20 = $dob[0]+$dob[1]+'/'+$dob[2]+$dob[3]+'/'+'20'+$dob[4]+$dob[5]
+        $foundPatientDetails = $false
+        foreach ($line in $OCRtext) {
+            $line = $line.ToLower()
+            if ($line.Contains($dob) -or $line.Contains($dob19) -or $line.Contains($dob20) -or $line.Contains($zipName)) {
+                $foundPatientDetails = $true
+                break
+            }
+        }
+        Remove-Item $env:temp\magickoutput.png
+        Remove-Item $env:temp\tesseractOCR.txt
+        return $foundPatientDetails
+    } catch {
+        Remove-Item $env:temp\magickoutput.png
+        Remove-Item $env:temp\tesseractOCR.txt
+        return $false
+    }
+}
+
+
 $global:zipFileNames = @()
+$global:zipPageCount = 0
 $cdfPath = $PWD.ToString() + "\cpdf.exe"
 
 function Add-FileToZip {
@@ -69,31 +102,41 @@ function Add-FileToZip {
     $FileBrowser.add_FileOk({
         param($s, $e)
         $filename = Split-Path $FileBrowser.FileName -leaf
-        if ($filename -match "^Scan\d{4}-\d\d-\d\d_\d{6}\.pdf$") {
+        if ($filename -match "^Scan\d{4}.*\.pdf$") {
             $e.Cancel = $true
             [System.Windows.MessageBox]::Show("Please rename the selected file: {0}" -f $filename, "Error")
         } elseif ($global:zipFileNames -contains $filename) {
             $e.Cancel = $true
             [System.Windows.MessageBox]::Show("You have already selected this file: {0}" -f $filename, "Error")
+        } elseif ((Check-DetailsOCR -file $FileBrowser.FileName) -match $false) {
+            $e.Cancel = $true
+            [System.Windows.MessageBox]::Show("Patient's DOB or Name was not found in this file: {0}. If you are sure this file belongs to the patient, add an underscore '_' to the end of the file name" -f $filename, "Error")
         }
     })
     
     # Don't autofill while fileDialog is open
     $autofillCheckbox.Checked = $false
     if ($FileBrowser.ShowDialog() -eq 1) { # sys.win.forms.dialogresult OK == 1
-        $global:zipFileNames += Split-Path $FileBrowser.FileName -leaf
-        $filesListedL.Text = $global:zipFileNames -join ', '
+        $global:zipFileNames += $FileBrowser.FileName
+        $filesListedL.Text += Split-Path $FileBrowser.FileName -leaf
         $fileCountL.Text = "Files added: {0}" -f $global:zipFileNames.Count
-        $pageCountL.Text = "Total pages: {0}" -f (&$cdfPath -pages $FileBrowser.FileName)
+        $global:zipPageCount += (&$cdfPath -pages -gs-malformed $FileBrowser.FileName)
+        $pageCountL.Text = "Total pages: {0}" -f $global:zipPageCount
         $ResetFilesButton.Enabled = $true
         $SendButton.Enabled = $true
-    } else {
+    } elseif ($global:zipFileNames.Count -eq 0) {
         # re-enable autofill if no file was added
         $autofillCheckbox.Checked = $true
     }
 }
 
 function Send-Email {
+    if (($global:zipFileNames | Test-Path) -notcontains $true) {
+        [System.Windows.MessageBox]::Show("One or more of the selected files is now invalid, selected files have been reset." -f $filename, "Error")
+        Clear-Files
+        return
+    }
+
     # Delete previous zip
     Remove-Item .\*.zip
 
@@ -112,7 +155,7 @@ function Send-Email {
     } else {
         $zipName = $zipName + ".zip"
     }
-    #TODO check that the files are VALID aka havent been renamed/don't exist
+
     if ($UnprotectedCheckbox.checked) {
         $ol = New-Object -ComObject Outlook.Application
         $new = $ol.CreateItem(0)
@@ -140,7 +183,7 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName PresentationCore,PresentationFramework # for messageBox
 
 $mainForm = New-Object System.Windows.Forms.Form
-$mainForm.Text ='NEW VERSION NEW VERSION Create New Email - Press F3 to copy DOB'
+$mainForm.Text ='Create New Email - Press F3 to copy DOB'
 $mainForm.Width = 460
 $mainForm.Height = 280
 $mainForm.AutoSize = $true
@@ -176,7 +219,7 @@ $textBox_KeyDown = [System.Windows.Forms.KeyEventHandler] {
         Clear-Form
         $_.SuppressKeyPress = $true
     } elseif ($_.KeyCode -eq 'Enter') {
-        #$AddFileButton.PerformClick()
+        $AddFileButton.PerformClick()
         $_.SuppressKeyPress = $true
     } elseif ($_.KeyCode -eq 'Escape') {
         #$ClearButton.PerformClick()
@@ -242,7 +285,6 @@ $dobBox.Width = 300
 $dobBox.Location = New-Object System.Drawing.Point(155, 50)
 $dobBox.MaxLength = 6
 $dobBox.add_KeyDown($textBox_KeyDown)
-$dobBox.Text = "111111"
 $mainForm.Controls.Add($dobBox)
 
 #DOB error label
@@ -443,18 +485,6 @@ $shortcutTimer.add_tick({
             Rename-Item $file $fileName
         }
     }
-
-    <#
-    foreach ($file in  Get-ChildItem -Path $global:defaultDir) {
-        switch ((Split-Path $file -Leaf).ToLower()) {
-            "coc.pdf"  {Rename-Item $file "Certificate of Capacity.pdf"}
-            "ir.pdf"   {Rename-Item $file "Imaging Request.pdf"}
-            "mc.pdf"   {Rename-Item $file "Medical Certificate.pdf"}
-            "pr.pdf"   {Rename-Item $file "Pathology Request.pdf"}
-            "ref.pdf"  {Rename-Item $file "Referral.pdf"}
-            "res.pdf"  {Rename-Item $file "Results.pdf"}
-        }
-    }#>
 })
 $shortcutTimer.Start()
 

@@ -37,9 +37,9 @@ function Set-FileDialog-Title {
         $email = $email.substring(0, 49) + '...'
     }
     if ($UnprotectedCheckbox.checked) {
-        return "Shortcuts: coc ir mc pr ref res        Email: $email        |        Subject: $subj"
+        return "Shortcuts: coc ir mc pr ref res        |        Email: $email        |        Subject: $subj"
     }
-    return "Shortcuts: coc ir mc pr ref res        Email: $email        |        Zip name: $zipName        |        Subject: $subj        |        DOB: $dobFmt"
+    return "Shortcuts: coc ir mc pr ref res        |        Email: $email        |        Zip name: $zipName        |        Subject: $subj        |        DOB: $dobFmt"
 }
 
 function Set-Default-Directory-Global {
